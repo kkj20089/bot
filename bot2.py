@@ -11,6 +11,9 @@ import pytz
 import signal
 import pyshorteners
 import logging
+import threading
+import http.server
+import socketserver
 
 # ✅ Configuration
 TOKEN = "7722342816:AAEkrArt2FHmKCcKap32AyKgnRootmzlV3M"
@@ -176,6 +179,21 @@ def main():
     print("Starting bot...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
+# Dummy Web Server to Prevent Koyeb Health Check Failure
+PORT = 8000
+Handler = http.server.SimpleHTTPRequestHandler
+
+def run_dummy_server():
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Serving HTTP on port {PORT} (Koyeb requirement)")
+        httpd.serve_forever()
+
+# Start Dummy Web Server in a Separate Thread
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
+# Start the Telegram Bot
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     try:
         signal.signal(signal.SIGINT, lambda s, f: (os.remove(PID_FILE), sys.exit(0)))
