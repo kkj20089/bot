@@ -112,15 +112,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    channel_name = query.data
+    channel_name = query.data.lower()  # Ensure lowercase for consistency
     channels = load_channels()
     now = datetime.now(TIMEZONE)
 
-    if channel_name.lower() not in channels:
-        await query.message.reply_text("Channel not found.")
+    if channel_name not in channels:
+        await query.message.reply_text("❌ Channel not found.")
         return
 
-    channel = channels[channel_name.lower()]
+    channel = channels[channel_name]
 
     # ✅ Check if link already exists in memory
     if channel_name in url_data:
@@ -128,22 +128,23 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             expiry = datetime.strptime(url_data[channel_name]["expiry"], "%Y-%m-%d %H:%M:%S")
             expiry = TIMEZONE.localize(expiry)
             if expiry > now and not url_data[channel_name]["link"].startswith("DELETED"):
-                msg1 = await query.message.reply_text(f"Channel link for {channel_name}:")
+                msg1 = await query.message.reply_text(f"🔗 Channel link for {channel['name']}:")
                 msg2 = await query.message.reply_text(url_data[channel_name]["link"])
                 asyncio.create_task(delete_after_delay([msg1, msg2], selection_message=query.message))
                 return
         except:
             pass
 
-    # ✅ Generate new short URL
-    short_link = shorten_url(channel["link"])
+    # ✅ Generate a new short URL if no valid entry exists
+    original_link = channel["link"]
+    short_link = shorten_url(original_link)
 
     url_data[channel_name] = {
         "link": short_link,
         "expiry": (now + timedelta(hours=17)).strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    msg1 = await query.message.reply_text(f"Channel link for {channel_name}:")
+    msg1 = await query.message.reply_text(f"🔗 Channel link for {channel['name']}:")
     msg2 = await query.message.reply_text(short_link)
     asyncio.create_task(delete_after_delay([msg1, msg2], selection_message=query.message))
 
