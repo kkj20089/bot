@@ -17,6 +17,178 @@ TOKEN = "7722342816:AAEkrArt2FHmKCcKap32AyKgnRootmzlV3M"
 TIMEZONE = pytz.timezone('Asia/Kolkata')
 PID_FILE = "bot.pid"
 
+
+# ✅ Load channels into a dictionary
+def load_channels():
+    channels = {}
+    for line in channel_data.strip().split("\n"):
+        if " = " in line:
+            parts = line.strip().split(" = ")
+            name = parts[0].lstrip("0123456789 ").strip()
+            link = parts[1].strip()
+            channels[name.lower()] = {"name": name, "link": link}
+    return channels
+
+# ✅ Shorten URLs
+def shorten_url(long_url):
+    try:
+        shortener = pyshorteners.Shortener()
+        return shortener.tinyurl.short(long_url)
+    except Exception as e:
+        print(f"Error shortening URL: {e}")
+        return long_url
+
+# ✅ Delete messages after 15 minutes
+async def delete_after_delay(messages, selection_message=None):
+    await asyncio.sleep(480)
+    for msg in messages:
+        try:
+            await msg.edit_text("Deleted for avoiding copyright. Tap /start to restart.")
+        except:
+            pass
+    if selection_message:
+        try:
+            await selection_message.edit_text("Deleted. Tap /start to restart.", reply_markup=None)
+        except:
+            pass
+
+
+# ✅ Start Command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pdf_path = os.path.join(os.getcwd(), "cleaned_data_columns (2).pdf")
+
+    # Send a message first
+    await update.message.reply_text('''
+📜 We currently have these channels available.Please check the attached list , 
+find your favorate channel type name here  ,
+you  will get a link , to play you need vlc player , 
+copy link go to vlc player then on bottom 
+there will be a button named as more tap there at there a button or place written with 
+new sream click there paste link and just wait few seconds nd boom , enjoy ''')
+
+    # Send the PDF file
+    with open(pdf_path, "rb") as pdf_file:
+        await update.message.reply_document(document=pdf_file, filename="Channel_List.pdf")
+
+# ✅ Search Function
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.lower()
+    channels = load_channels()
+
+    if not channels:
+        await update.message.reply_text("Error: Channel list is empty.")
+        return
+
+    matches = [channels[name] for name in channels if query in name]
+
+    if not matches:
+        await update.message.reply_text("No channels found. Try another keyword.")
+        return
+
+    buttons = [[InlineKeyboardButton(ch["name"], callback_data=ch["name"])] for ch in sorted(matches, key=lambda x: x["name"])[:20]]
+    reply_markup = InlineKeyboardMarkup(buttons)
+
+    selection_msg = await update.message.reply_text("Select channel:", reply_markup=reply_markup)
+    asyncio.create_task(delete_after_delay([], selection_message=selection_msg))
+
+# ✅ Handle Button Clicks
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    channel_name = query.data
+    channels = load_channels()
+    now = datetime.now(TIMEZONE)
+
+    if channel_name.lower() not in channels:
+        await query.message.reply_text("Channel not found.")
+        return
+
+    channel = channels[channel_name.lower()]
+
+    # ✅ Check if link already exists in memory
+    if channel_name in url_data:
+        try:
+            expiry = datetime.strptime(url_data[channel_name]["expiry"], "%Y-%m-%d %H:%M:%S")
+            expiry = TIMEZONE.localize(expiry)
+            if expiry > now and not url_data[channel_name]["link"].startswith("DELETED"):
+                msg1 = await query.message.reply_text(f"Channel link for {channel_name}:")
+                msg2 = await query.message.reply_text(url_data[channel_name]["link"])
+                asyncio.create_task(delete_after_delay([msg1, msg2], selection_message=query.message))
+                return
+        except:
+            pass
+
+    # ✅ Generate new short URL
+    short_link = shorten_url(channel["link"])
+
+    url_data[channel_name] = {
+        "link": short_link,
+        "expiry": (now + timedelta(hours=17)).strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+    msg1 = await query.message.reply_text(f"Channel link for {channel_name}:")
+    msg2 = await query.message.reply_text(short_link)
+    asyncio.create_task(delete_after_delay([msg1, msg2], selection_message=query.message))
+
+# ✅ Auto-Refresh Expired Codes
+async def refresh_codes(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        now = datetime.now(TIMEZONE)
+
+        for channel in url_data:
+            try:
+                expiry = datetime.strptime(url_data[channel]["expiry"], "%Y-%m-%d %H:%M:%S")
+                expiry = TIMEZONE.localize(expiry)
+                if now > expiry or now > expiry + timedelta(days=30):
+                    url_data[channel]["link"] = "DELETED_" + shorten_url("https://expired-url.com")
+                    url_data[channel]["expiry"] = now.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                url_data[channel]["link"] = "DELETED_" + shorten_url("https://expired-url.com")
+                url_data[channel]["expiry"] = now.strftime("%Y-%m-%d %H:%M:%S")
+
+        print("Codes refreshed")
+    except Exception as e:
+        print(f"Error refreshing codes: {e}")
+
+# ✅ Run Bot
+def main():
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            os.kill(old_pid, signal.SIGTERM)
+            print(f"Terminated existing bot instance (PID: {old_pid})")
+        except:
+            pass
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+
+    print("Initializing bot...")
+    app = Application.builder().token(TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
+    app.add_handler(CallbackQueryHandler(button))
+
+    app.job_queue.run_repeating(refresh_codes, interval=17*60*60, first=17*60*60)
+    
+    print("Starting bot...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    try:
+        signal.signal(signal.SIGINT, lambda s, f: (os.remove(PID_FILE), sys.exit(0)))
+        signal.signal(signal.SIGTERM, lambda s, f: (os.remove(PID_FILE), sys.exit(0)))
+        main()
+    except KeyboardInterrupt:
+        print("\nStopping bot...")
+        os.remove(PID_FILE)
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        os.remove(PID_FILE)
+        sys.exit(1)
+
 # ✅ In-memory JSON storage
 url_data = {}
 
@@ -674,174 +846,3 @@ channel_data = """
 649 devang s2 Bandish Bandits episode 8 = https://www.tgxdl.workers.dev/dl/67b88050905d7ae32b6cad32
 650 devang s2 Bandish Bandits episode 9 = chahiye bas 70 gb ki hai best of the best quality aasi quality nahi milegi kahi bhi 8k se bhi jada 
 """
-
-# ✅ Load channels into a dictionary
-def load_channels():
-    channels = {}
-    for line in channel_data.strip().split("\n"):
-        if " = " in line:
-            parts = line.strip().split(" = ")
-            name = parts[0].lstrip("0123456789 ").strip()
-            link = parts[1].strip()
-            channels[name.lower()] = {"name": name, "link": link}
-    return channels
-
-# ✅ Shorten URLs
-def shorten_url(long_url):
-    try:
-        shortener = pyshorteners.Shortener()
-        return shortener.tinyurl.short(long_url)
-    except Exception as e:
-        print(f"Error shortening URL: {e}")
-        return long_url
-
-# ✅ Delete messages after 15 minutes
-async def delete_after_delay(messages, selection_message=None):
-    await asyncio.sleep(480)
-    for msg in messages:
-        try:
-            await msg.edit_text("Deleted for avoiding copyright. Tap /start to restart.")
-        except:
-            pass
-    if selection_message:
-        try:
-            await selection_message.edit_text("Deleted. Tap /start to restart.", reply_markup=None)
-        except:
-            pass
-
-
-# ✅ Start Command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pdf_path = "D:\\my creation\\roo\\z our\\cleaned_data_columns (2).pdf"
-
-    # Send a message first
-    await update.message.reply_text('''
-📜 We currently have these channels available.Please check the attached list , 
-find your favorate channel type name here  ,
-you  will get a link , to play you need vlc player , 
-copy link go to vlc player then on bottom 
-there will be a button named as more tap there at there a button or place written with 
-new sream click there paste link and just wait few seconds nd boom , enjoy ''')
-
-    # Send the PDF file
-    with open(pdf_path, "rb") as pdf_file:
-        await update.message.reply_document(document=pdf_file, filename="Channel_List.pdf")
-
-# ✅ Search Function
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.lower()
-    channels = load_channels()
-
-    if not channels:
-        await update.message.reply_text("Error: Channel list is empty.")
-        return
-
-    matches = [channels[name] for name in channels if query in name]
-
-    if not matches:
-        await update.message.reply_text("No channels found. Try another keyword.")
-        return
-
-    buttons = [[InlineKeyboardButton(ch["name"], callback_data=ch["name"])] for ch in sorted(matches, key=lambda x: x["name"])[:20]]
-    reply_markup = InlineKeyboardMarkup(buttons)
-
-    selection_msg = await update.message.reply_text("Select channel:", reply_markup=reply_markup)
-    asyncio.create_task(delete_after_delay([], selection_message=selection_msg))
-
-# ✅ Handle Button Clicks
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    channel_name = query.data
-    channels = load_channels()
-    now = datetime.now(TIMEZONE)
-
-    if channel_name.lower() not in channels:
-        await query.message.reply_text("Channel not found.")
-        return
-
-    channel = channels[channel_name.lower()]
-
-    # ✅ Check if link already exists in memory
-    if channel_name in url_data:
-        try:
-            expiry = datetime.strptime(url_data[channel_name]["expiry"], "%Y-%m-%d %H:%M:%S")
-            expiry = TIMEZONE.localize(expiry)
-            if expiry > now and not url_data[channel_name]["link"].startswith("DELETED"):
-                msg1 = await query.message.reply_text(f"Channel link for {channel_name}:")
-                msg2 = await query.message.reply_text(url_data[channel_name]["link"])
-                asyncio.create_task(delete_after_delay([msg1, msg2], selection_message=query.message))
-                return
-        except:
-            pass
-
-    # ✅ Generate new short URL
-    short_link = shorten_url(channel["link"])
-
-    url_data[channel_name] = {
-        "link": short_link,
-        "expiry": (now + timedelta(hours=17)).strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    msg1 = await query.message.reply_text(f"Channel link for {channel_name}:")
-    msg2 = await query.message.reply_text(short_link)
-    asyncio.create_task(delete_after_delay([msg1, msg2], selection_message=query.message))
-
-# ✅ Auto-Refresh Expired Codes
-async def refresh_codes(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        now = datetime.now(TIMEZONE)
-
-        for channel in url_data:
-            try:
-                expiry = datetime.strptime(url_data[channel]["expiry"], "%Y-%m-%d %H:%M:%S")
-                expiry = TIMEZONE.localize(expiry)
-                if now > expiry or now > expiry + timedelta(days=30):
-                    url_data[channel]["link"] = "DELETED_" + shorten_url("https://expired-url.com")
-                    url_data[channel]["expiry"] = now.strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                url_data[channel]["link"] = "DELETED_" + shorten_url("https://expired-url.com")
-                url_data[channel]["expiry"] = now.strftime("%Y-%m-%d %H:%M:%S")
-
-        print("Codes refreshed")
-    except Exception as e:
-        print(f"Error refreshing codes: {e}")
-
-# ✅ Run Bot
-def main():
-    if os.path.exists(PID_FILE):
-        try:
-            with open(PID_FILE, 'r') as f:
-                old_pid = int(f.read().strip())
-            os.kill(old_pid, signal.SIGTERM)
-            print(f"Terminated existing bot instance (PID: {old_pid})")
-        except:
-            pass
-    with open(PID_FILE, 'w') as f:
-        f.write(str(os.getpid()))
-
-    print("Initializing bot...")
-    app = Application.builder().token(TOKEN).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
-    app.add_handler(CallbackQueryHandler(button))
-
-    app.job_queue.run_repeating(refresh_codes, interval=17*60*60, first=17*60*60)
-    
-    print("Starting bot...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == "__main__":
-    try:
-        signal.signal(signal.SIGINT, lambda s, f: (os.remove(PID_FILE), sys.exit(0)))
-        signal.signal(signal.SIGTERM, lambda s, f: (os.remove(PID_FILE), sys.exit(0)))
-        main()
-    except KeyboardInterrupt:
-        print("\nStopping bot...")
-        os.remove(PID_FILE)
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        os.remove(PID_FILE)
-        sys.exit(1)
