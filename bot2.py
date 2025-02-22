@@ -20,28 +20,30 @@ TOKEN = "7722342816:AAEkrArt2FHmKCcKap32AyKgnRootmzlV3M"
 TIMEZONE = pytz.timezone('Asia/Kolkata')
 PID_FILE = "bot.pid"
 
-
-# ✅ In-memory JSON storage
-url_data = {}
-
 # ✅ Load channels from output.kkj file
 def load_channels():
     channels = {}
     file_path = os.path.join(os.getcwd(), "output.kkj")  # Ensure correct path
 
     if not os.path.exists(file_path):
-        print("Error: Channel data file 'output.kkj' not found.")
+        print("❌ Error: Channel data file 'output.kkj' not found.")
         return channels
 
-    with open(file_path, "r", encoding="utf-8") as file:
-        for line in file:
-            if " = " in line:
-                parts = line.strip().split(" = ")
-                name = parts[0].lstrip("0123456789 ").strip()
-                link = parts[1].strip()
-                channels[name.lower()] = {"name": name, "link": link}
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+                if " = " in line:  # Ensure valid format
+                    parts = line.split(" = ", 1)
+                    name = parts[0].lstrip("0123456789. ").strip()
+                    link = parts[1].strip()
+                    channels[name.lower()] = {"name": name, "link": link}
+    except Exception as e:
+        print(f"❌ Error reading 'output.kkj': {e}")
 
+    print(f"✅ Loaded {len(channels)} channels from 'output.kkj'")
     return channels
+
 
 # ✅ Shorten URLs
 def shorten_url(long_url):
