@@ -20,6 +20,9 @@ TOKEN = "7722342816:AAEkrArt2FHmKCcKap32AyKgnRootmzlV3M"
 TIMEZONE = pytz.timezone('Asia/Kolkata')
 PID_FILE = "bot.pid"
 
+# ✅ In-memory JSON storage
+url_data = {}
+
 # ✅ Load channels from output.kkj file
 def load_channels():
     channels = {}
