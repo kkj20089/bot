@@ -35,13 +35,13 @@ def load_channels():
                 line = line.strip()
                 if " = " in line:  # Ensure valid format
                     parts = line.split(" = ", 1)
-                    name = parts[0].lstrip("0123456789. ").strip()
+                    name = parts[0].lstrip("0123456789. ").strip().lower()  # Ensure lowercase
                     link = parts[1].strip()
-                    channels[name.lower()] = {"name": name, "link": link}
+                    channels[name] = {"name": name, "link": link}
     except Exception as e:
         print(f"❌ Error reading 'output.kkj': {e}")
 
-    print(f"✅ Loaded {len(channels)} channels from 'output.kkj'")
+    print(f"✅ Loaded {len(channels)} channels from 'output.kkj': {list(channels.keys())}")
     return channels
 
 
@@ -112,15 +112,21 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    channel_name = query.data.lower()  # Ensure lowercase for consistency
-    channels = load_channels()
+    channel_name = query.data.strip().lower()  # Ensure lowercase match
+    channels = load_channels()  # Reload channels to get latest data
     now = datetime.now(TIMEZONE)
 
+    if not channels:  # Check if channels dictionary is empty
+        await query.message.reply_text("❌ Error: Channel list is empty.")
+        return
+
     if channel_name not in channels:
+        # Debugging: Show available keys if channel is not found
+        print(f"❌ Channel '{channel_name}' not found. Available keys: {list(channels.keys())}")
         await query.message.reply_text("❌ Channel not found.")
         return
 
-    channel = channels[channel_name]
+    channel = channels[channel_name]  # Get the channel details
 
     # ✅ Check if link already exists in memory
     if channel_name in url_data:
@@ -137,6 +143,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ✅ Generate a new short URL if no valid entry exists
     original_link = channel["link"]
+    if not original_link.startswith("http"):  # Validate URL
+        await query.message.reply_text("❌ Invalid channel link.")
+        return
+
     short_link = shorten_url(original_link)
 
     url_data[channel_name] = {
